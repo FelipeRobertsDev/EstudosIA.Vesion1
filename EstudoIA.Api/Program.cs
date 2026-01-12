@@ -1,16 +1,15 @@
-using Microsoft.AspNetCore.Mvc;
-using EstudoIA.Api.Extensions.Jwt;
+﻿using Microsoft.AspNetCore.Mvc;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
 builder.Services.AddApplication(builder.Configuration);
 
-
-//builder.Services.AddJwtAuthentication(builder.Configuration);
-
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -22,27 +21,24 @@ builder.Services.AddApiVersioning(options =>
     options.ReportApiVersions = true;
 });
 
-builder.Services
-    .AddControllers()
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.Converters.Add(
-            new JsonStringEnumConverter());
-    });
+// ✅ REGISTRA CORS (estava faltando no seu "cors completo")
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", p =>
+        p.AllowAnyOrigin()
+         .AllowAnyHeader()
+         .AllowAnyMethod());
+});
 
 var app = builder.Build();
 
-// Swagger
 app.UseSwagger();
 app.UseSwaggerUI();
 
-
 app.UseHttpsRedirection();
 
-
-//app.UseAuthentication();
-//app.UseAuthorization();
+// ✅ APLICA CORS (antes de MapControllers)
+app.UseCors("AllowFrontend");
 
 app.MapControllers();
-
 app.Run();
