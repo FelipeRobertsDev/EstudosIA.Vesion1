@@ -29,7 +29,9 @@ public class GeminiHttpClient : IGeminiHttpClient
         {
             generationConfig = new
             {
-                responseMimeType = "application/json"
+                responseMimeType = "application/json",
+                temperature = 0.6,
+                maxOutputTokens = 16384
             },
             contents = new[]
             {
@@ -56,6 +58,9 @@ public class GeminiHttpClient : IGeminiHttpClient
         var extractedText = ExtractTextFromGeminiResponse(rawJson);
         var jsonOnly = ExtractJsonObject(extractedText);
 
+        // ✅ tenta reparar quando vier truncado/cortado (muito comum com listas grandes)
+        jsonOnly = TryFixTruncatedJson(jsonOnly);
+
         TourismSummaryResponse? result;
         try
         {
@@ -68,14 +73,33 @@ public class GeminiHttpClient : IGeminiHttpClient
         }
         catch (JsonException ex)
         {
-            var preview = jsonOnly.Length <= 500 ? jsonOnly : jsonOnly.Substring(0, 500);
-            throw new Exception($"Falha ao desserializar JSON do Gemini. Início do JSON: {preview}", ex);
+            var preview = jsonOnly.Length <= 800 ? jsonOnly : jsonOnly.Substring(0, 800);
+            throw new Exception($"Falha ao desserializar JSON do Gemini (mesmo após tentativa de reparo). Início do JSON: {preview}", ex);
         }
 
         if (result is null)
             throw new Exception("Resposta do Gemini inválida ou vazia após desserialização.");
 
+        foreach (var s in result.Spots)
+        {
+            s.Category = NormalizeCategory(s.Category);
+        }
+
         return result;
+    }
+
+    private static string NormalizeCategory(string? cat)
+    {
+        cat = (cat ?? "").Trim().ToLowerInvariant();
+
+        return cat switch
+        {
+            "praia" or "praias" => "praias",
+            "cultura" or "cultural" => "cultura",
+            "gastronomia" or "comida" or "restaurantes" => "gastronomia",
+            "aventura" or "natureza" or "trilha" => "aventura",
+            _ => "cultura" // fallback seguro
+        };
     }
 
     // ==========================
@@ -85,6 +109,7 @@ public class GeminiHttpClient : IGeminiHttpClient
     {
         return $@"
 Responda APENAS com JSON VÁLIDO, sem comentários ou texto fora do JSON.
+NÃO use markdown. NÃO use ```.
 
 Schema:
 {{
@@ -104,6 +129,7 @@ Schema:
   ""spots"": [
     {{
       ""name"": ""string"",
+      ""category"": ""praias|cultura|gastronomia|aventura"",
       ""oneLineSummary"": ""string"",
       ""whyGo"": ""string"",
       ""neighborhoodOrArea"": ""string"",
@@ -120,10 +146,31 @@ Schema:
 Regras importantes:
 - Não invente números exatos de criminalidade.
 - Use apenas low|medium|high para o safetyIndex.
-- Baseie-se em noções gerais de segurança turística, e deixe claro que varia por bairro e horário.
-- Em ""sourceNote"", escreva: ""Varia por bairro e horário; confira fontes oficiais e notícias locais.""
-- Máximo de {r.MaxPlaces} pontos turísticos.
+- Baseie-se em noções gerais de segurança turística; deixe claro que varia por bairro e horário.
+- Em ""sourceNote"", escreva EXATAMENTE: ""Varia por bairro e horário; confira fontes oficiais e notícias locais.""
 - Idioma: {r.Language}.
+
+Quantidade (OBRIGATÓRIO):
+- Gere NO MÍNIMO 16 pontos turísticos e tente chegar em 20–22 (priorize consistência de JSON).
+- Não repita lugares.
+
+Tamanho (OBRIGATÓRIO para evitar truncar):
+- oneLineSummary: até 140 caracteres.
+- whyGo: até 220 caracteres.
+- howToGetThere: 1 linha curta.
+- openingHoursNote: 1 linha curta.
+- tips: no máximo 2 itens, curtos.
+
+Regras de categorização (OBRIGATÓRIO preencher ""category""):
+- Use SOMENTE: praias, cultura, gastronomia, aventura
+- praias: praias, mirantes costeiros, passeios no mar, beach clubs
+- cultura: museus, centros históricos, igrejas, monumentos, mirantes urbanos, tours culturais
+- gastronomia: mercados, restaurantes icônicos, cafés famosos, comidas típicas
+- aventura: trilhas, parques grandes, atividades ao ar livre, esportes, aquários/zoos (quando foco for experiência)
+
+Distribuição (OBRIGATÓRIO):
+- Tente distribuir assim: cultura 8–12, gastronomia 4–6, aventura 3–5, praias 0–3 (se fizer sentido).
+- Se não houver praias, não invente.
 
 Cidade: {r.City}
 País: {r.Country}
@@ -132,6 +179,46 @@ Orçamento: {r.Budget ?? "geral"}
 ";
     }
 
+    // ==========================
+    // ✅ Reparo de JSON truncado
+    // ==========================
+    private static string TryFixTruncatedJson(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return json;
+
+        int openBraces = 0;   // {
+        int openBrackets = 0; // [
+        bool inString = false;
+        bool escape = false;
+
+        foreach (var ch in json)
+        {
+            if (inString)
+            {
+                if (escape) { escape = false; continue; }
+                if (ch == '\\') { escape = true; continue; }
+                if (ch == '"') inString = false;
+                continue;
+            }
+
+            if (ch == '"') { inString = true; continue; }
+
+            if (ch == '{') openBraces++;
+            else if (ch == '}') openBraces--;
+            else if (ch == '[') openBrackets++;
+            else if (ch == ']') openBrackets--;
+        }
+
+        // fecha string se terminou no meio
+        if (inString) json += "\"";
+
+        // fecha arrays e objetos abertos
+        if (openBrackets > 0) json += new string(']', openBrackets);
+        if (openBraces > 0) json += new string('}', openBraces);
+
+        return json;
+    }
 
     // ==========================
     // Helpers Gemini
@@ -172,6 +259,7 @@ Orçamento: {r.Budget ?? "geral"}
 
         text = text.Trim();
 
+        // Se por algum motivo vier com fence, remove
         if (text.StartsWith("```"))
         {
             var firstNewLine = text.IndexOf('\n');
@@ -190,7 +278,7 @@ Orçamento: {r.Budget ?? "geral"}
 
         if (start < 0 || end < 0 || end <= start)
         {
-            var preview = text.Length <= 500 ? text : text.Substring(0, 500);
+            var preview = text.Length <= 800 ? text : text.Substring(0, 800);
             throw new Exception($"Não foi encontrado um objeto JSON válido na resposta do Gemini. Conteúdo inicial: {preview}");
         }
 

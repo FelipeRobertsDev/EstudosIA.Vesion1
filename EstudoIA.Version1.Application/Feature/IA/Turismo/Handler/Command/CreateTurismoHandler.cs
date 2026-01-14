@@ -54,11 +54,6 @@ public class CreateTurismoHandler : HandlerBase<TourismSummaryRequest, TourismSu
                 .WithMessage("A cidade é obrigatória.")
                 .MaximumLength(100);
 
-            RuleFor(x => x.MaxPlaces)
-                .GreaterThan(0)
-                .WithMessage("MaxPlaces deve ser maior que zero.")
-                .LessThanOrEqualTo(15)
-                .WithMessage("MaxPlaces não pode ser maior que 15.");
 
             RuleFor(x => x.Language)
                 .NotEmpty()

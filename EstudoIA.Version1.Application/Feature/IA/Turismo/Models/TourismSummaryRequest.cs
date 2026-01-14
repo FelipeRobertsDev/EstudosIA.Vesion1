@@ -9,7 +9,7 @@ public class TourismSummaryRequest : IRequest<TourismSummaryResponse>
     public required string City { get; init; }
 
     // opcional: pra personalizar
-    public int MaxPlaces { get; init; } = 8;
+    //public int MaxPlaces { get; init; } = 8;
     public string? TravelerProfile { get; init; } // ex: "família", "mochilão", "casal"
     public string? Budget { get; init; } // ex: "baixo", "médio", "alto"
     [JsonIgnore]

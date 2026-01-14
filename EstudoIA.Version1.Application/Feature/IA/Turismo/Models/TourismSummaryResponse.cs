@@ -9,6 +9,8 @@ public class TourismSummaryResponse
     public string? SafetyNotes { get; init; }
     public string? BestTimeToVisit { get; init; }
     public string? LocalTransportTips { get; init; }
+    
+
 }
 
 public sealed class TouristSpot
@@ -29,7 +31,7 @@ public sealed class TouristSpot
     public string PlaceQuery { get; set; } = "";  // ex: "Parque Ibirapuera, São Paulo, Brasil"
     public string ImageUrl { get; set; } = "";    // preenchido pelo backend (Google Places)
     public string ImageSource { get; set; } = ""; // "google-places" / "confira no site oficial"
-
+    public string Category { get; set; } = "cultura";
 
 
     public TourismSpotSafetyDto Safety { get; set; } = new();

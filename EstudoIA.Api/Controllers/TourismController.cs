@@ -1,6 +1,5 @@
 ﻿using EstudoIA.Version1.Application.Abstractions.Handlers;
 using EstudoIA.Version1.Application.Feature.IA.Turismo.Models;
-using EstudoIA.Version1.Application.Feature.Payment.Models;
 using EstudoIA.Version1.Application.Feature.UsuarioTourism.Models;
 using EstudosIA.Version1.ApplicationCommon.Results.Extentions;
 using Microsoft.AspNetCore.Mvc;
