@@ -15,6 +15,8 @@ public class TourismSummaryResponse
 
 public sealed class TouristSpot
 {
+    public Guid Id { get; set; }
+
     public required string Name { get; init; }
     public string? OneLineSummary { get; init; }
     public string? WhyGo { get; init; }
@@ -32,6 +34,8 @@ public sealed class TouristSpot
     public string ImageUrl { get; set; } = "";    // preenchido pelo backend (Google Places)
     public string ImageSource { get; set; } = ""; // "google-places" / "confira no site oficial"
     public string Category { get; set; } = "cultura";
+
+    public bool IsInRoute { get; set;} = false;
 
 
     public TourismSpotSafetyDto Safety { get; set; } = new();

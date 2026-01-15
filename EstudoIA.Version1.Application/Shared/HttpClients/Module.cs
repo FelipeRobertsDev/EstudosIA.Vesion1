@@ -23,26 +23,38 @@ public static class HttpClientExtensions
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
         });
 
-        // ===== GEMINI =====
+        // ===== GEMINI (OpenRouter por baixo) =====
         var geminiSettings = configuration.GetSection("MachineLearning:Gemini");
-        var geminiBaseUrl = geminiSettings["BaseUrl"];
-        var apiVersion = geminiSettings["ApiVersion"];
 
-        var geminiApiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
-        if (string.IsNullOrWhiteSpace(geminiApiKey))
+        var geminiBaseUrl = geminiSettings["BaseUrl"];
+        if (string.IsNullOrWhiteSpace(geminiBaseUrl))
+            throw new Exception("MachineLearning:Gemini:BaseUrl não configurada");
+
+        // Mantendo o nome que você já usa
+        var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+        if (string.IsNullOrWhiteSpace(apiKey))
             throw new Exception("GEMINI_API_KEY não configurada");
+
+        // Opcional, mas recomendado
+        var referer =
+            Environment.GetEnvironmentVariable("OPENROUTER_REFERER")
+            ?? geminiSettings["Referer"]
+            ?? "http://localhost";
+
+        var appTitle =
+            Environment.GetEnvironmentVariable("OPENROUTER_APP_TITLE")
+            ?? geminiSettings["AppTitle"]
+            ?? "EstudoIA";
 
         services.AddHttpClient<IGeminiHttpClient, GeminiHttpClient>(client =>
         {
-            // Base: https://generativelanguage.googleapis.com/v1beta/
-            client.BaseAddress = new Uri($"{geminiBaseUrl}/{apiVersion}/");
+            client.BaseAddress = new Uri(geminiBaseUrl);
 
-            
             client.DefaultRequestHeaders.Accept.Add(
                 new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
-            
-            client.DefaultRequestHeaders.Add("X-Goog-Api-Key", geminiApiKey);
+            client.DefaultRequestHeaders.TryAddWithoutValidation("HTTP-Referer", referer);
+            client.DefaultRequestHeaders.TryAddWithoutValidation("X-Title", appTitle);
         });
         // Places resolver
         services.AddHttpClient<IPlaceImageResolver, WikipediaImageResolver>(client =>

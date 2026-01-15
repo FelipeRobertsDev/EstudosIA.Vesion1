@@ -26,6 +26,7 @@ namespace EstudoIA.Version1.Application.Feature.UsuarioTourism.Handler.Querie
             return Result<LoginUserTourismResponse>.Success(new LoginUserTourismResponse
             {
                 Name = user.Name,
+                Id = user.Id
 
             });
         }

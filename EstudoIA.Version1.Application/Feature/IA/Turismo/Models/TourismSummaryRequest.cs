@@ -14,4 +14,6 @@ public class TourismSummaryRequest : IRequest<TourismSummaryResponse>
     public string? Budget { get; init; } // ex: "baixo", "médio", "alto"
     [JsonIgnore]
     public string? Language { get; init; } = "pt-BR";
+
+    public Guid UserId { get; init; }
 }

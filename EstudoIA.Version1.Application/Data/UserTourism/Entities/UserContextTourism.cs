@@ -1,4 +1,5 @@
 ﻿using EstudoIA.Version1.Application.Data.UserContext.Abstractions;
+using EstudoIA.Version1.Application.Data.UserTripPlans.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,8 +16,6 @@ namespace EstudoIA.Version1.Application.Data.UserTourism.Entities
         public string PasswordHash { get; set; } = string.Empty;
 
         public string Email { get; set; } = string.Empty;
-
-
         public void SetPassword(string password)
         {
             if (string.IsNullOrWhiteSpace(password))
