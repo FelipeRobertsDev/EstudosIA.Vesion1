@@ -4,6 +4,7 @@ using EstudoIA.Version1.Application.Shared.HttpClients.PaymentGatewayMercadoPago
 using EstudoIA.Version1.Application.Shared.Places;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.Net.Http.Headers;
 
 public static class HttpClientExtensions
 {
@@ -20,7 +21,7 @@ public static class HttpClientExtensions
         {
             client.BaseAddress = new Uri(baseUrl);
             client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+                new AuthenticationHeaderValue("Bearer", accessToken);
         });
 
         // ===== GEMINI (OpenRouter por baixo) =====
@@ -30,12 +31,10 @@ public static class HttpClientExtensions
         if (string.IsNullOrWhiteSpace(geminiBaseUrl))
             throw new Exception("MachineLearning:Gemini:BaseUrl não configurada");
 
-        // Mantendo o nome que você já usa
         var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
         if (string.IsNullOrWhiteSpace(apiKey))
             throw new Exception("GEMINI_API_KEY não configurada");
 
-        // Opcional, mas recomendado
         var referer =
             Environment.GetEnvironmentVariable("OPENROUTER_REFERER")
             ?? geminiSettings["Referer"]
@@ -46,27 +45,37 @@ public static class HttpClientExtensions
             ?? geminiSettings["AppTitle"]
             ?? "EstudoIA";
 
+        // Typed client do OpenRouter
         services.AddHttpClient<IGeminiHttpClient, GeminiHttpClient>(client =>
         {
             client.BaseAddress = new Uri(geminiBaseUrl);
 
             client.DefaultRequestHeaders.Accept.Add(
-                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                new MediaTypeWithQualityHeaderValue("application/json"));
 
             client.DefaultRequestHeaders.TryAddWithoutValidation("HTTP-Referer", referer);
             client.DefaultRequestHeaders.TryAddWithoutValidation("X-Title", appTitle);
+
+            // Seu código manda Bearer no request, então não precisa setar aqui.
+            client.Timeout = TimeSpan.FromSeconds(240);
         });
+
+        // ===== GEO (Nominatim / OSM) =====
+        services.AddHttpClient("geo", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+
+            // Nominatim exige User-Agent identificável
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("EstudoIA/1.0 (contato@seuapp.com)");
+            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        });
+
         // Places resolver
         services.AddHttpClient<IPlaceImageResolver, WikipediaImageResolver>(client =>
         {
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(
-                "EstudoIA-Tourism/1.0 (dev@local)"
-            );
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("EstudoIA-Tourism/1.0 (dev@local)");
             client.Timeout = TimeSpan.FromSeconds(10);
         });
-
-
-
 
         services.AddScoped<TourismSummaryService>();
         return services;

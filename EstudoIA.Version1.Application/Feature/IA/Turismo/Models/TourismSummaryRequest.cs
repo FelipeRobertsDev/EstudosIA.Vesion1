@@ -16,4 +16,8 @@ public class TourismSummaryRequest : IRequest<TourismSummaryResponse>
     public string? Language { get; init; } = "pt-BR";
 
     public Guid UserId { get; init; }
+
+    public bool IsMock { get; set; }
+
+
 }

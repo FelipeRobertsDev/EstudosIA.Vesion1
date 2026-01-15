@@ -1,5 +1,7 @@
 ﻿using EstudoIA.Version1.Application.Feature.IA.Turismo.Models;
 using Microsoft.Extensions.Configuration;
+using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -8,16 +10,32 @@ namespace EstudoIA.Version1.Application.Shared.HttpClients.IA.Gemini;
 
 public class GeminiHttpClient : IGeminiHttpClient
 {
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient _httpClient;          // OpenRouter
+    private readonly HttpClient _geoHttpClient;       // Geocoding
     private readonly IConfiguration _configuration;
 
     private const int MIN_SPOTS = 16;
     private const int MAX_ATTEMPTS = 2;
 
-    public GeminiHttpClient(HttpClient httpClient, IConfiguration configuration)
+    // ===== Geocoding settings (Nominatim) =====
+    private static readonly TimeSpan GeoMinDelay = TimeSpan.FromMilliseconds(1100); // 1 req/s-ish
+    private static DateTime _lastGeoCallUtc = DateTime.MinValue;
+    private static readonly SemaphoreSlim _geoLock = new(1, 1);
+
+    // Cache simples: placeQuery -> (lat,lng) ou null (cacheia "miss" também)
+    private static readonly ConcurrentDictionary<string, (double? lat, double? lng)> _geoCache = new();
+
+    public GeminiHttpClient(HttpClient httpClient, HttpClient geoHttpClient, IConfiguration configuration)
     {
         _httpClient = httpClient;
+        _geoHttpClient = geoHttpClient;
         _configuration = configuration;
+
+        // Se você usar Nominatim, ele exige User-Agent identificável
+        if (!_geoHttpClient.DefaultRequestHeaders.UserAgent.Any())
+        {
+            _geoHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("EstudoIA/1.0 (contato@seuapp.com)");
+        }
     }
 
     public async Task<TourismSummaryResponse> GetTourismSummaryAsync(
@@ -37,7 +55,6 @@ public class GeminiHttpClient : IGeminiHttpClient
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)
         {
-            // 2ª tentativa: reforça regra e reduz temperature pra ficar mais “obediente”
             var prompt = attempt == 1
                 ? promptBase
                 : promptBase + @"
@@ -50,12 +67,9 @@ IMPORTANTE:
             var body = new
             {
                 model = model,
-                messages = new[]
-                {
-                    new { role = "user", content = prompt }
-                },
+                messages = new[] { new { role = "user", content = prompt } },
                 temperature = attempt == 1 ? 0.6 : 0.2,
-                max_tokens = 5000
+                max_tokens = attempt == 1 ? 4500 : 5200
             };
 
             var req = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
@@ -76,7 +90,6 @@ IMPORTANTE:
 
             var (content, finishReason) = ExtractContentAndFinishReason(rawJson);
 
-            // Se truncou por limite de tokens, retry (se ainda tiver tentativa)
             if (string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase))
             {
                 Console.WriteLine($"[IA] finish_reason=length (truncado). Tentativa {attempt}/{MAX_ATTEMPTS}");
@@ -136,10 +149,141 @@ IMPORTANTE:
             foreach (var s in result.Spots)
                 s.Category = NormalizeCategory(s.Category);
 
+            // ✅ ENRIQUECE LAT/LNG AQUI (sem depender da IA)
+            await EnrichSpotsWithGeoAsync(result, request, ct);
+
             return result;
         }
 
         throw new Exception("Falha ao gerar roteiro válido após retentativas.");
+    }
+
+    // ==========================
+    // Geocoding enrichment
+    // ==========================
+    private async Task EnrichSpotsWithGeoAsync(TourismSummaryResponse result, TourismSummaryRequest req, CancellationToken ct)
+    {
+        if (result.Spots is null || result.Spots.Count == 0) return;
+
+        foreach (var s in result.Spots)
+        {
+            // Se já veio preenchido por algum motivo, não mexe
+            if (s.Lat is not null && s.Lng is not null) continue;
+
+            var pq = (s.PlaceQuery ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(pq)) continue;
+
+            // 1) tenta com placeQuery completo
+            var geo = await GeocodeNominatimAsync(pq, ct);
+
+            // 2) fallback: "<name>, <city>, <country>" se falhar
+            if (geo is null)
+            {
+                var fallback = BuildFallbackPlaceQuery(s.Name, req.City, req.Country);
+                if (!string.Equals(fallback, pq, StringComparison.OrdinalIgnoreCase))
+                    geo = await GeocodeNominatimAsync(fallback, ct);
+            }
+
+            if (geo is not null)
+            {
+                s.Lat = geo.Value.lat;
+                s.Lng = geo.Value.lng;
+            }
+        }
+    }
+
+    private static string BuildFallbackPlaceQuery(string? name, string city, string country)
+    {
+        name = (name ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            return $"{city}, {country}";
+        return $"{name}, {city}, {country}";
+    }
+
+    /// <summary>
+    /// Nominatim: /search?q=...&format=json&limit=1
+    /// Retorna null se não encontrar.
+    /// Cache + rate limit simples incluídos.
+    /// </summary>
+    private async Task<(double lat, double lng)?> GeocodeNominatimAsync(string placeQuery, CancellationToken ct)
+    {
+        placeQuery = placeQuery.Trim();
+        if (placeQuery.Length == 0) return null;
+
+        // cache
+        if (_geoCache.TryGetValue(placeQuery, out var cached))
+        {
+            if (cached.lat is not null && cached.lng is not null)
+                return (cached.lat.Value, cached.lng.Value);
+            return null; // cache miss
+        }
+
+        // rate limit serializado
+        await _geoLock.WaitAsync(ct);
+        try
+        {
+            var now = DateTime.UtcNow;
+            var since = now - _lastGeoCallUtc;
+            if (since < GeoMinDelay)
+                await Task.Delay(GeoMinDelay - since, ct);
+
+            _lastGeoCallUtc = DateTime.UtcNow;
+
+            var url =
+                "https://nominatim.openstreetmap.org/search" +
+                $"?q={Uri.EscapeDataString(placeQuery)}&format=json&limit=1";
+
+            using var resp = await _geoHttpClient.GetAsync(url, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                // Cacheia como miss pra não ficar repetindo erro toda hora
+                _geoCache[placeQuery] = (null, null);
+                return null;
+            }
+
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+
+            var arr = doc.RootElement;
+            if (arr.ValueKind != JsonValueKind.Array || arr.GetArrayLength() == 0)
+            {
+                _geoCache[placeQuery] = (null, null);
+                return null;
+            }
+
+            var first = arr[0];
+
+            // Nominatim retorna "lat" e "lon" como strings
+            if (!first.TryGetProperty("lat", out var latEl) || !first.TryGetProperty("lon", out var lonEl))
+            {
+                _geoCache[placeQuery] = (null, null);
+                return null;
+            }
+
+            if (!double.TryParse(latEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var lat))
+            {
+                _geoCache[placeQuery] = (null, null);
+                return null;
+            }
+
+            if (!double.TryParse(lonEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var lng))
+            {
+                _geoCache[placeQuery] = (null, null);
+                return null;
+            }
+
+            _geoCache[placeQuery] = (lat, lng);
+            return (lat, lng);
+        }
+        catch
+        {
+            _geoCache[placeQuery] = (null, null);
+            return null;
+        }
+        finally
+        {
+            _geoLock.Release();
+        }
     }
 
     // ==========================
@@ -189,7 +333,7 @@ IMPORTANTE:
     private static string BuildPrompt(TourismSummaryRequest r)
     {
         return $@"
-Responda APENAS com JSON VÁLIDO, sem comentários ou texto fora do JSON.
+Responda APENAS com JSON VÁLLIDO, sem comentários ou texto fora do JSON.
 NÃO use markdown. NÃO use ```.
 
 Schema:
@@ -231,17 +375,31 @@ Regras importantes:
 - Em ""sourceNote"", escreva EXATAMENTE: ""Varia por bairro e horário; confira fontes oficiais e notícias locais.""
 - Idioma: {r.Language}.
 
+Regra CRÍTICA de placeQuery (para geocoding):
+- ""placeQuery"" deve ser SEMPRE: ""<nome do lugar>, <bairro ou área>, <cidade>, <país>""
+- Nunca deixe ""placeQuery"" vazio.
+- Se o lugar for um bairro (ex: Alfama), use: ""Alfama, Lisboa, Portugal""
+- Se não souber o bairro, use: ""<nome do lugar>, {r.City}, {r.Country}""
+- Não invente coordenadas. NÃO inclua lat/lng no JSON.
+
 Quantidade (REGRA CRÍTICA):
 - Gere EXATAMENTE entre 16 e 22 itens no array ""spots"".
 - Se gerar menos de 16, a resposta será considerada INVÁLIDA.
 - Não encerre a resposta antes de completar no mínimo 16 itens.
 
 Tamanho (OBRIGATÓRIO para evitar truncar):
-- oneLineSummary: até 140 caracteres.
-- whyGo: até 220 caracteres.
-- howToGetThere: 1 linha curta.
-- openingHoursNote: 1 linha curta.
-- tips: no máximo 2 itens, curtos.
+- bestTimeToVisit: 1 linha curta (máx 140 caracteres).
+- localTransportTips: 1 linha curta (máx 160 caracteres).
+- safetyNotes: 1 linha curta (máx 160 caracteres).
+- safetyIndex.notes: 1 linha curta (máx 140 caracteres).
+- oneLineSummary: até 120 caracteres.
+- whyGo: até 160 caracteres.
+- neighborhoodOrArea: curto (bairro/área).
+- howToGetThere: 1 linha curta (máx 120 caracteres).
+- openingHoursNote: 1 linha curta (máx 120 caracteres).
+- timeNeeded: curto (ex: ""1–2h"", ""meio dia"").
+- priceRange: curto (ex: ""gratuito"", ""€10–€15"", ""varia"").
+- tips: no máximo 2 itens, cada um com no máx 90 caracteres.
 
 Regras de categorização (OBRIGATÓRIO preencher ""category""):
 - Use SOMENTE: praias, cultura, gastronomia, aventura
@@ -268,7 +426,6 @@ Orçamento: {r.Budget ?? "geral"}
 
         text = text.Trim();
 
-        // caso venha com fences (não deveria, mas protegemos)
         if (text.StartsWith("```"))
         {
             var firstNewLine = text.IndexOf('\n');

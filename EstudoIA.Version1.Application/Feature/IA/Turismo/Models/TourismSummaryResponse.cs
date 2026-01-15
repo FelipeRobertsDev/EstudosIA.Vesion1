@@ -2,9 +2,9 @@
 
 public class TourismSummaryResponse
 {
-    public required string City { get; init; }
-    public required string Country { get; init; }
-    public required List<TouristSpot> Spots { get; init; } = new();
+    public string City { get; init; }
+    public string Country { get; init; }
+    public  List<TouristSpot> Spots { get; init; } = new();
     public TourismSafetyIndexDto SafetyIndex { get; set; } = new();
     public string? SafetyNotes { get; init; }
     public string? BestTimeToVisit { get; init; }
@@ -17,7 +17,7 @@ public sealed class TouristSpot
 {
     public Guid Id { get; set; }
 
-    public required string Name { get; init; }
+    public  string Name { get; init; }
     public string? OneLineSummary { get; init; }
     public string? WhyGo { get; init; }
 
@@ -37,6 +37,8 @@ public sealed class TouristSpot
 
     public bool IsInRoute { get; set;} = false;
 
+    public double? Lat { get; set; }
+    public double? Lng { get; set; }
 
     public TourismSpotSafetyDto Safety { get; set; } = new();
 }
