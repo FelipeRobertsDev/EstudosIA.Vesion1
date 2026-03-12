@@ -50,19 +50,19 @@ public static class HttpClientExtensions
             ?? "EstudoIA";
 
         // Typed client do OpenRouter
-        services.AddHttpClient<IGeminiHttpClient, GeminiHttpClient>(client =>
-        {
-            client.BaseAddress = new Uri(geminiBaseUrl);
+        //services.AddHttpClient<IGeminiHttpClient, GeminiHttpClient>(client =>
+        //{
+        //    client.BaseAddress = new Uri(geminiBaseUrl);
 
-            client.DefaultRequestHeaders.Accept.Add(
-                new MediaTypeWithQualityHeaderValue("application/json"));
+        //    client.DefaultRequestHeaders.Accept.Add(
+        //        new MediaTypeWithQualityHeaderValue("application/json"));
 
-            client.DefaultRequestHeaders.TryAddWithoutValidation("HTTP-Referer", referer);
-            client.DefaultRequestHeaders.TryAddWithoutValidation("X-Title", appTitle);
+        //    client.DefaultRequestHeaders.TryAddWithoutValidation("HTTP-Referer", referer);
+        //    client.DefaultRequestHeaders.TryAddWithoutValidation("X-Title", appTitle);
 
-            // Seu código manda Bearer no request, então não precisa setar aqui.
-            client.Timeout = TimeSpan.FromSeconds(240);
-        });
+        //    // Seu código manda Bearer no request, então não precisa setar aqui.
+        //    client.Timeout = TimeSpan.FromSeconds(240);
+        //});
 
         // ===== GEO (Nominatim / OSM) =====
         services.AddHttpClient("geo", client =>
@@ -81,7 +81,7 @@ public static class HttpClientExtensions
             client.Timeout = TimeSpan.FromSeconds(10);
         });
 
-        services.AddScoped<TourismSummaryService>();
+        //services.AddScoped<TourismSummaryService>();
 
 
         //CloudApi
