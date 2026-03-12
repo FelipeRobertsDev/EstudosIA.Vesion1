@@ -1,6 +1,10 @@
-﻿using EstudoIA.Version1.Application.Shared.HttpClients.IA;
+﻿using EstudoIA.Version1.Application.Services.Options;
+using EstudoIA.Version1.Application.Shared.HttpClients.CloudApi;
+using EstudoIA.Version1.Application.Shared.HttpClients.EvolutionApi;
+using EstudoIA.Version1.Application.Shared.HttpClients.IA;
 using EstudoIA.Version1.Application.Shared.HttpClients.IA.Gemini;
 using EstudoIA.Version1.Application.Shared.HttpClients.PaymentGatewayMercadoPago;
+using EstudoIA.Version1.Application.Shared.HttpClients.Twilio;
 using EstudoIA.Version1.Application.Shared.Places;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -78,6 +82,26 @@ public static class HttpClientExtensions
         });
 
         services.AddScoped<TourismSummaryService>();
+
+
+        //CloudApi
+        services.Configure<WhatsAppCloudApiOptions>(
+        configuration.GetSection(WhatsAppCloudApiOptions.SectionName));
+        services.AddHttpClient<IWhatsAppService, WhatsAppCloudApiService>();
+
+        //Twilio
+        services.Configure<TwilioWhatsAppOptions>(
+        configuration.GetSection(TwilioWhatsAppOptions.SectionName));
+
+        services.AddHttpClient<IWhatsAppTwilioService, TwilioWhatsAppService>();
+
+
+        //Evolution
+        services.Configure<EvolutionWhatsAppOptions>(
+        configuration.GetSection("EvolutionWhatsApp"));
+
+        services.AddHttpClient<IWhatsAppEvolutionService, EvolutionWhatsAppService>();
+
         return services;
     }
 }

@@ -2,7 +2,6 @@
 using EstudoIA.Version1.Application.Data.UserTripPlans;
 using EstudoIA.Version1.Application.Feature.IA.Turismo.Models;
 using EstudoIA.Version1.Application.Shared.HttpClients.IA;
-using EstudoIA.Version1.Application.Shared.HttpClients.IA.Gemini;
 using EstudosIA.Version1.ApplicationCommon.Results;
 using FluentValidation;
 using System.Text.Json;
